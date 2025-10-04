@@ -6,15 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environment variables from .env
+# Load .env file
 load_dotenv()
 
-# Initialize OpenAI client with API key from environment
+# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-app = FastAPI(title="Simple AI PDF Summarizer")
+app = FastAPI(title="AI PDF Summarizer")
 
-# Enable CORS so frontend can call backend
+# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +25,7 @@ app.add_middleware(
 
 
 def extract_text_from_pdf(path: str) -> str:
-    """Extract text from all pages of a PDF file."""
+    """Extract plain text from all PDF pages."""
     doc = fitz.open(path)
     text = ""
     for page in doc:
@@ -36,40 +36,36 @@ def extract_text_from_pdf(path: str) -> str:
 
 @app.post("/summarize-pdf")
 async def summarize_pdf(file: UploadFile = File(...)):
-    """Upload a PDF and return a summary using OpenAI."""
+    """Upload a PDF, extract text, and summarize with OpenAI."""
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    # Save file temporarily
+    # Save PDF temporarily
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     tmp.write(await file.read())
     tmp.close()
 
-    # Extract text
+    # Extract text from PDF
     text = extract_text_from_pdf(tmp.name)
     if not text:
         raise HTTPException(status_code=400, detail="Could not extract text from PDF")
 
-    # Build prompt (truncate if too large)
-    prompt = f"Summarize the following PDF content in 5-6 sentences:\n\n{text[:5000]}"
+    # Truncate large PDFs
+    content = text[:5000]
+
+    # Prompt for summarization
+    prompt = f"Summarize the following PDF content in 5-6 clear sentences:\n\n{content}"
 
     try:
-        # ✅ Fixed: use max_output_tokens (not max_tokens)
+        # ✅ Correct usage of Responses API
         response = client.responses.create(
             model="gpt-4o-mini",
             input=prompt,
             max_output_tokens=300,
         )
 
-        # Extract output text
-        summary = ""
-        if hasattr(response, "output") and response.output:
-            for item in response.output:
-                for c in item.get("content", []):
-                    if isinstance(c, dict) and c.get("type") == "output_text":
-                        summary += c.get("text", "")
-        if not summary:
-            summary = getattr(response, "output_text", "No summary generated.")
+        # Easiest way: directly get the summary
+        summary = response.output_text
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OpenAI error: {e}")
